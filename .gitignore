@@ -1,0 +1,15 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Internal planning notes, training artifacts, reference clone (not part of this repo)
+PLAN.md
+checkpoints/
+instant-ngp/
