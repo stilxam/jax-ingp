@@ -48,6 +48,21 @@ def mip_from_pos(pos: Float[Array, "3"], max_cascade: int) -> Int[Array, ""]:
     return jnp.clip(exponent + 2.0, 0, max_cascade).astype(jnp.int32)
 
 
+def mip_from_dt(
+    dt: Float[Array, ""], pos: Float[Array, "3"], max_cascade: int, grid_size: int
+) -> Int[Array, ""]:
+    """Escalates `mip_from_pos`'s position-only cascade to a coarser one
+    when the actual step size `dt` is too large for a finer cascade's
+    voxels to represent, matching instant-ngp's `mip_from_dt` (used on the
+    training path only; render path uses plain `mip_from_pos` —
+    nerf_device.cuh:450-459)."""
+    mip = mip_from_pos(pos, max_cascade)
+    dt_scaled = dt * 2.0 * grid_size
+    exponent = jnp.floor(jnp.log2(jnp.maximum(dt_scaled, 1e-10))) + 1.0
+    escalated = jnp.clip(jnp.maximum(mip.astype(jnp.float32), exponent), 0, max_cascade).astype(jnp.int32)
+    return jnp.where(dt_scaled < 1.0, mip, escalated)
+
+
 def cascaded_grid_coord(
     pos: Float[Array, "3"], mip: Int[Array, ""], grid_size: int
 ) -> tuple[Int[Array, "3"], Bool[Array, ""]]:

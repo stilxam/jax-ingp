@@ -6,7 +6,7 @@ from jaxtyping import Array, Float, PRNGKeyArray
 
 from jaxingp.data.image_dataset import load_image
 from jaxingp.data.transforms import load_transforms
-from jaxingp.geometry.aabb import fit_scene_transform
+from jaxingp.geometry.aabb import BoundingBox, aabb_from_scale, max_cascade_from_aabb_scale
 from jaxingp.geometry.rays import camera_ray
 
 
@@ -23,10 +23,12 @@ class NerfDataset:
     p2: float
     h: int
     w: int
-    scale: Float[Array, ""]
+    scale: float
     offset: Float[Array, "3"]
+    aabb: BoundingBox
+    max_cascade: int
 
-    def __init__(self, images, c2w, fx, fy, cx, cy, k1, k2, p1, p2, h, w, scale, offset):
+    def __init__(self, images, c2w, fx, fy, cx, cy, k1, k2, p1, p2, h, w, scale, offset, aabb, max_cascade):
         self.images = images
         self.c2w = c2w
         self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
@@ -34,17 +36,17 @@ class NerfDataset:
         self.h, self.w = h, w
         self.scale = scale
         self.offset = offset
+        self.aabb = aabb
+        self.max_cascade = max_cascade
 
     @staticmethod
-    def load(json_path: str, downscale: int = 1) -> "NerfDataset":
+    def load(json_path: str, downscale: int = 1, n_cascades: int = 8) -> "NerfDataset":
         td = load_transforms(json_path)
         frames = [fr for fr in td.frames if os.path.exists(os.path.join(td.base_dir, fr.file_path))]
         images = jnp.stack(
             [load_image(os.path.join(td.base_dir, fr.file_path), downscale) for fr in frames]
         )
         c2w = jnp.stack([jnp.array(fr.transform_matrix) for fr in frames])
-
-        scale, offset = fit_scene_transform(c2w[:, :3, 3])
 
         h, w = images.shape[1], images.shape[2]
         s = 1.0 / downscale
@@ -61,8 +63,10 @@ class NerfDataset:
             p2=td.p2,
             h=h,
             w=w,
-            scale=scale,
-            offset=offset,
+            scale=td.scale,
+            offset=jnp.array(td.offset),
+            aabb=aabb_from_scale(td.aabb_scale, n_cascades),
+            max_cascade=max_cascade_from_aabb_scale(td.aabb_scale),
         )
 
     def _ray_unit_space(self, img_idx, py, px):

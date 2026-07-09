@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from jaxingp.config import NerfNetworkConfig
 from jaxingp.data.nerf_dataset import NerfDataset
-from jaxingp.geometry.aabb import BoundingBox
 from jaxingp.nn.nerf_network import NerfNetwork
 from jaxingp.occupancy.grid import OccupancyGrid, mark_untrained_density_grid, update_occupancy_grid
 from jaxingp.render.render import (
@@ -34,8 +33,10 @@ def loss_uniform(model, aabb, rays_o, rays_d, target, n_samples, key, background
 
 
 def loss_adaptive(model, grid, aabb, rays_o, rays_d, target, march_cfg, background):
+    # use_mip_from_dt=True: CUDA's training path uses the dt-aware cascade
+    # lookup (mip_from_dt), not the position-only one used for eval/render.
     pred_rgb, _, n_valid = render_rays_adaptive(
-        model, grid, aabb, rays_o, rays_d, *march_cfg, background
+        model, grid, aabb, rays_o, rays_d, *march_cfg, background, use_mip_from_dt=True
     )
     return jnp.mean((pred_rgb - target) ** 2), n_valid
 
@@ -177,7 +178,10 @@ def main():
     parser.add_argument("--n-samples", type=int, default=64)
     parser.add_argument("--max-samples", type=int, default=64, help="adaptive marcher: max samples/ray")
     parser.add_argument("--max-march-iters", type=int, default=1024)
-    parser.add_argument("--cone-min-stepsize", type=float, default=1.0 / 1024)
+    parser.add_argument(
+        "--cone-angle", type=float, default=None,
+        help="overrides the derived cone_angle_constant (0.0 if aabb_scale<=1 else 1/256, testbed_nerf.cu:2440)",
+    )
     parser.add_argument("--near-distance", type=float, default=1e-3)
     parser.add_argument("--grid-size", type=int, default=64)
     parser.add_argument("--n-cascades", type=int, default=8)
@@ -203,7 +207,12 @@ def main():
     model_key, data_key = jax.random.split(key)
     model = NerfNetwork(model_key, NerfNetworkConfig())
     ema_model = model
-    aabb = BoundingBox()
+    aabb = dataset.aabb
+    max_cascade = dataset.max_cascade
+    # cone_angle_constant = aabb_scale<=1 ? 0.0 : 1/256 (testbed_nerf.cu:2440).
+    # aabb_scale<=1 <=> max_cascade==0 given max_cascade_from_aabb_scale.
+    cone_angle = args.cone_angle if args.cone_angle is not None else (0.0 if max_cascade == 0 else 1.0 / 256.0)
+    log.info(f"aabb={aabb.min_corner.tolist()}..{aabb.max_corner.tolist()} max_cascade={max_cascade} cone_angle={cone_angle}")
     eval_background = jnp.ones(3)
 
     optimizer = build_nerf_optimizer(
@@ -211,7 +220,7 @@ def main():
     )
     opt_state = optimizer.init(eqx.filter(model, eqx.is_array))
 
-    march_cfg = (args.max_samples, args.max_march_iters, args.cone_min_stepsize, args.near_distance)
+    march_cfg = (args.max_samples, args.max_march_iters, cone_angle, max_cascade, args.near_distance)
     grid = None
     if args.marcher == "adaptive":
         grid = OccupancyGrid(grid_size=args.grid_size, n_cascades=args.n_cascades)

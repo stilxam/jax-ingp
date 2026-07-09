@@ -12,7 +12,6 @@ from PIL import Image
 
 from jaxingp.config import NerfNetworkConfig
 from jaxingp.data.nerf_dataset import NerfDataset
-from jaxingp.geometry.aabb import BoundingBox
 from jaxingp.nn.nerf_network import NerfNetwork
 from jaxingp.occupancy.grid import OccupancyGrid
 from jaxingp.render.render import render_rays_adaptive_chunked, render_rays_uniform_chunked
@@ -28,15 +27,16 @@ def main():
     parser.add_argument("--n-samples", type=int, default=64)
     parser.add_argument("--max-samples", type=int, default=64)
     parser.add_argument("--max-march-iters", type=int, default=1024)
-    parser.add_argument("--cone-min-stepsize", type=float, default=1.0 / 1024)
     parser.add_argument("--near-distance", type=float, default=1e-3)
     parser.add_argument("--grid-size", type=int, default=64)
     parser.add_argument("--n-cascades", type=int, default=8)
     parser.add_argument("--out", type=str, default="/tmp/novel_view.png")
     args = parser.parse_args()
 
-    dataset = NerfDataset.load(args.transforms, downscale=args.downscale)
-    aabb = BoundingBox()
+    dataset = NerfDataset.load(args.transforms, downscale=args.downscale, n_cascades=args.n_cascades)
+    aabb = dataset.aabb
+    max_cascade = dataset.max_cascade
+    cone_angle = 0.0 if max_cascade == 0 else 1.0 / 256.0
     background = jnp.ones(3)
 
     key = jax.random.PRNGKey(0)
@@ -51,7 +51,7 @@ def main():
         grid = checkpoint.load(grid_path, OccupancyGrid(grid_size=args.grid_size, n_cascades=args.n_cascades))
         pred, n_valid = render_rays_adaptive_chunked(
             model, grid, aabb, rays_o, rays_d,
-            args.max_samples, args.max_march_iters, args.cone_min_stepsize, args.near_distance, background,
+            args.max_samples, args.max_march_iters, cone_angle, max_cascade, args.near_distance, background,
         )
         print(f"n_valid mean {float(n_valid.mean()):.1f} max {int(n_valid.max())}")
     else:

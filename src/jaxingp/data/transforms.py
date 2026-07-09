@@ -23,6 +23,8 @@ class TransformsData:
     p1: float
     p2: float
     aabb_scale: float
+    scale: float
+    offset: tuple
     frames: list
     base_dir: str
 
@@ -47,6 +49,11 @@ def load_transforms(path: str) -> TransformsData:
         p1=d.get("p1", 0.0),
         p2=d.get("p2", 0.0),
         aabb_scale=d.get("aabb_scale", 1),
+        # NERF_SCALE=0.33 / offset=(0.5,0.5,0.5) is instant-ngp's default
+        # (nerf_loader.h:29, nerf_loader.cu:163-164), overridable by the
+        # dataset's own "scale"/"offset" json fields.
+        scale=d.get("scale", 0.33),
+        offset=tuple(d.get("offset", (0.5, 0.5, 0.5))),
         frames=[Frame(fr["file_path"], fr["transform_matrix"]) for fr in d["frames"]],
         base_dir=os.path.dirname(os.path.abspath(path)),
     )

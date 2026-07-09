@@ -84,9 +84,11 @@ def render_rays_adaptive(
     rays_d: Float[Array, "n_rays 3"],
     max_samples: int,
     max_march_iters: int,
-    cone_angle_min_stepsize: float,
+    cone_angle: float,
+    max_cascade: int,
     near_distance: float,
     background: Float[Array, "3"],
+    use_mip_from_dt: bool = False,
 ) -> tuple[Float[Array, "n_rays 3"], Float[Array, "n_rays"], Int[Array, "n_rays"]]:
     """Occupancy-grid adaptive marching + compositing. Flattens all rays'
     padded samples into one (n_rays*max_samples,) batch for a single big
@@ -94,7 +96,8 @@ def render_rays_adaptive(
     the padded/masked layout makes this a trivial reshape, unlike CUDA's
     ray-indexed access pattern which needs explicit numsteps/base offsets."""
     march = march_rays(
-        rays_o, rays_d, grid, aabb, max_samples, max_march_iters, cone_angle_min_stepsize, near_distance,
+        rays_o, rays_d, grid, aabb, max_samples, max_march_iters, cone_angle, max_cascade,
+        near_distance, use_mip_from_dt,
     )
     n_rays = rays_o.shape[0]
     flat_pos = march.positions.reshape(-1, 3)
@@ -117,10 +120,12 @@ def render_rays_adaptive_chunked(
     rays_d: Float[Array, "n_rays 3"],
     max_samples: int,
     max_march_iters: int,
-    cone_angle_min_stepsize: float,
+    cone_angle: float,
+    max_cascade: int,
     near_distance: float,
     background: Float[Array, "3"],
     chunk_size: int = 8192,
+    use_mip_from_dt: bool = False,
 ) -> tuple[Float[Array, "n_rays 3"], Int[Array, "n_rays"]]:
     n_rays = rays_o.shape[0]
     rgb_out, n_valid_out = [], []
@@ -128,7 +133,8 @@ def render_rays_adaptive_chunked(
         end = min(start + chunk_size, n_rays)
         rgb, _, n_valid = render_rays_adaptive(
             model, grid, aabb, rays_o[start:end], rays_d[start:end],
-            max_samples, max_march_iters, cone_angle_min_stepsize, near_distance, background,
+            max_samples, max_march_iters, cone_angle, max_cascade, near_distance, background,
+            use_mip_from_dt,
         )
         rgb_out.append(rgb)
         n_valid_out.append(n_valid)

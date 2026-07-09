@@ -30,7 +30,7 @@ import viser.transforms as vtf
 
 from jaxingp.config import NerfNetworkConfig, SdfNetworkConfig
 from jaxingp.data.voxel_dataset import load_voxel_grid, synthesize_toy_volume
-from jaxingp.geometry.aabb import BoundingBox
+from jaxingp.geometry.aabb import BoundingBox, aabb_from_scale, max_cascade_from_aabb_scale
 from jaxingp.nn.nerf_network import NerfNetwork
 from jaxingp.nn.sdf_network import SdfNetwork
 from jaxingp.occupancy.grid import OccupancyGrid
@@ -72,14 +72,20 @@ def make_render_fn(args):
         model = checkpoint.load(
             os.path.join(args.checkpoint, "ema_model.eqx"), NerfNetwork(key, NerfNetworkConfig())
         )
-        aabb = BoundingBox()
+        # No transforms.json here (checkpoint-only viewer) — aabb_scale
+        # defaults to 1 (matches the old fixed [0,1]^3 box); pass
+        # --aabb-scale to match whatever the checkpoint was actually
+        # trained with.
+        aabb = aabb_from_scale(args.aabb_scale, args.n_cascades)
+        max_cascade = max_cascade_from_aabb_scale(args.aabb_scale)
+        cone_angle = 0.0 if max_cascade == 0 else 1.0 / 256.0
         grid_path = os.path.join(args.checkpoint, "grid.eqx")
 
         if os.path.exists(grid_path):
             grid = checkpoint.load(
                 grid_path, OccupancyGrid(grid_size=args.grid_size, n_cascades=args.n_cascades)
             )
-            march_cfg = (args.max_samples, args.max_march_iters, args.cone_min_stepsize, args.near_distance)
+            march_cfg = (args.max_samples, args.max_march_iters, cone_angle, max_cascade, args.near_distance)
 
             @eqx.filter_jit
             def render(rays_o, rays_d):
@@ -132,10 +138,10 @@ def main():
     parser.add_argument("--n-samples", type=int, default=64)
     parser.add_argument("--max-samples", type=int, default=64)
     parser.add_argument("--max-march-iters", type=int, default=1024)
-    parser.add_argument("--cone-min-stepsize", type=float, default=1.0 / 1024)
     parser.add_argument("--near-distance", type=float, default=1e-3)
     parser.add_argument("--grid-size", type=int, default=128)
     parser.add_argument("--n-cascades", type=int, default=8)
+    parser.add_argument("--aabb-scale", type=float, default=1.0, help="nerf mode: match the checkpoint's training dataset")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 

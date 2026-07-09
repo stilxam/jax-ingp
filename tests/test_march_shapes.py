@@ -37,15 +37,17 @@ def test_nerf_adaptive_marcher():
     grid = chex_replace_density(grid, jnp.ones_like(grid.density) * 1e4)
     aabb = BoundingBox()
 
-    n_rays, max_samples = 32, 16
+    n_rays, max_samples, max_cascade = 32, 16, grid.n_cascades - 1
     rays_o, rays_d = random_rays(key, n_rays)
-    march = march_rays(rays_o, rays_d, grid, aabb, max_samples, 256, 1.0 / 256, 1e-3)
+    march = march_rays(rays_o, rays_d, grid, aabb, max_samples, 256, 1.0 / 256, max_cascade, 1e-3)
     chex.assert_shape(march.positions, (n_rays, max_samples, 3))
     chex.assert_shape(march.n_valid, (n_rays,))
     chex.assert_tree_all_finite(march.positions)
     assert bool(jnp.all(march.n_valid >= 0)) and bool(jnp.all(march.n_valid <= max_samples))
 
-    rgb, acc, n_valid = render_rays_adaptive(model, grid, aabb, rays_o, rays_d, max_samples, 256, 1.0 / 256, 1e-3, jnp.ones(3))
+    rgb, acc, n_valid = render_rays_adaptive(
+        model, grid, aabb, rays_o, rays_d, max_samples, 256, 1.0 / 256, max_cascade, 1e-3, jnp.ones(3)
+    )
     chex.assert_shape(rgb, (n_rays, 3))
     chex.assert_tree_all_finite(rgb)
     chex.assert_tree_all_finite(acc)

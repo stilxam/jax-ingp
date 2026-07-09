@@ -33,20 +33,26 @@ class BoundingBox(eqx.Module):
         return jnp.all((pos >= self.min_corner) & (pos <= self.max_corner))
 
 
-def fit_scene_transform(
-    camera_positions: Float[Array, "N 3"], margin: float = 1.25
-) -> tuple[Float[Array, ""], Float[Array, "3"]]:
-    """Auto-fit a uniform scale + offset mapping camera positions into [0,1]^3.
-
-    Deliberate simplification vs. instant-ngp's fixed NERF_SCALE=0.33 /
-    offset=(0.5,0.5,0.5) convention (which assumes normalized NeRF-synthetic
-    scene units): instead fit a similarity transform (uniform scale, so
-    distances/directions aren't skewed per-axis) from the actual camera
-    positions, centered at 0.5 with a margin so the scene fits comfortably
-    inside the unit cube regardless of the dataset's native scale.
+def aabb_from_scale(aabb_scale: float, n_cascades: int) -> BoundingBox:
+    """Training/render AABB from a dataset's `aabb_scale`, matching
+    instant-ngp exactly (testbed_nerf.cu:2408-2436):
+        m_aabb = BoundingBox{(0.5,0.5,0.5), (0.5,0.5,0.5)}
+        m_aabb.inflate(0.5 * min(2**(n_cascades-1), aabb_scale))
+    i.e. a box centered at (0.5,0.5,0.5) with side length
+    `min(2**(n_cascades-1), aabb_scale)` — capped at the occupancy grid's
+    total cascade range so the box never exceeds what the grid can index.
     """
-    center = jnp.mean(camera_positions, axis=0)
-    radius = jnp.max(jnp.linalg.norm(camera_positions - center, axis=-1)) * margin
-    scale = 0.5 / radius
-    offset = 0.5 - center * scale
-    return scale, offset
+    half_extent = 0.5 * min(2 ** (n_cascades - 1), aabb_scale)
+    center = jnp.full(3, 0.5)
+    return BoundingBox(center - half_extent, center + half_extent)
+
+
+def max_cascade_from_aabb_scale(aabb_scale: float) -> int:
+    """`ceil(log2(aabb_scale))`, matching instant-ngp's while-loop exactly
+    (testbed_nerf.cu:2412-2414) — 0 when aabb_scale<=1. Clamps which of the
+    occupancy grid's (always fully-allocated) cascades are actually used
+    during marching; not traced, computed once at dataset-load time."""
+    max_cascade = 0
+    while (1 << max_cascade) < aabb_scale:
+        max_cascade += 1
+    return max_cascade
